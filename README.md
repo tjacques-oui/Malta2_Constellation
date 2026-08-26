@@ -25,7 +25,7 @@ Controls and monitors the Texio PW-A powersource over USB (`pyusb`), providing t
 Opens the USB connection to the IF-41USB, flushes any stale data left in the buffer, then queries the device (`PW?`) to confirm that the configured address (`PwrSttAdd`, e.g. `"PW 1"`) actually corresponds to a connected unit — raising an error (not just a warning) if no match is found, so the satellite properly fails instead of silently continuing. Reads the voltage/current setpoints (`v_avdd`, `v_dvdd`, `i_avdd`, `i_dvdd`, `v_pwell`, `v_sub`, `i_pwell`, `i_sub`) and the short-circuit detection threshold from the configuration, and registers the telemetry metrics.
 
 **`launching` → `do_launching`**
-Runs the PowerOn sequence: enables remote control, checks the current status and reconfigures the output limits/voltages from the configuration if they don't already match, enables the main output, ramps PWELL/SUB up progressively in steps, then enables DVDD/AVDD.
+Checks the current status and reconfigures the output limits/voltages from the configuration if they don't already match. Runs the POWER ON sequence of Malta 2 sensors
 
 **`starting` → `do_starting`**
 Opens a timestamped logfile under `./logs` for this run's current readings.
@@ -37,19 +37,15 @@ Polls the powersource status, parses the four voltages and four currents, checks
 Closes the logfile and empties the USB buffer.
 
 **`landing` → `do_landing`**
-Runs the full graceful power-down sequence (see below) and releases the USB device.
+Runs POWER-DOWN sequence (see below) and releases the USB device.
 
 **`failure` (any state) → `fail_gracefully`**
-Runs the **same full graceful power-down sequence** as `do_landing` (ramp-down, not an abrupt cut), with a hard `SW0` cut as a last-resort fallback only if the graceful sequence itself fails (e.g. the device stopped responding).
+Runs the **same power-down sequence** as `do_landing`, with a hard `SW0` cut as a last-resort fallback only if the graceful sequence itself fails (e.g. the device stopped responding).
 
 ### Safety checks (in `do_run`)
 
 - **Overcurrent warning**: if a measured current reaches or exceeds 90% of that output's configured maximum current, a warning is logged (the run continues).
 - **Short-circuit detection**: if a measured voltage drops below a configurable fraction (`short_circuit_threshold_pct`, default 50%) of that output's configured setpoint, an error is raised, stopping the run and triggering the graceful shutdown. A relative threshold is used rather than a fixed voltage, since AVDD/DVDD (~1.8V) and PWELL/SUB (~6V) have very different nominal voltages.
-
-### Known issues / things to double check
-
-- The "already configured, skip re-init" fast path in `_finit` compares the device's status string against a value built from the configured setpoints; if the device formats floats differently than Python's default `str()` (e.g. `"0.70"` vs `"0.7"`), this check may never match — harmless, it just means the outputs get reconfigured every time instead of being skipped when already correct.
 
 ### Configuration keys
 
@@ -69,7 +65,7 @@ Runs the **same full graceful power-down sequence** as `do_landing` (ramp-down, 
 
 ### Overview
 
-Wraps the existing `MaltaMultiDAQ` C++ binary (ROOT/TApplication-based readout of the MALTA planes) and an optional Corryvreckan-based online monitor, managing only the **lifecycle** of these two external processes — no DAQ logic is reimplemented.
+Wraps the existing `MaltaMultiDAQ` C++ binary (ROOT/TApplication-based readout of the MALTA planes) and an optional Corryvreckan-based online monitor, Does not send data in constellation but uses the Online Monitor to do it.
 
 ### FSM State Actions
 
@@ -77,13 +73,13 @@ Wraps the existing `MaltaMultiDAQ` C++ binary (ROOT/TApplication-based readout o
 Reads the configuration: `binary_path`, `daq_config`, `work_dir`, `output_dir`, `monitor_script` (default `run_onlinemonitor.sh`), `monitor_dir`.
 
 **`starting` → `do_starting(run_id)`**
-Splits the Constellation run identifier (e.g. `edda_71`) on the **last** underscore to get an integer run number for the binary's `-r` argument, creates the run's output directory if needed, launches `MaltaMultiDAQ` with `cwd` set to `work_dir` (so its own relative config paths resolve correctly), and waits up to 60 seconds for a `"Start"` line on its stdout/stderr before considering the launch successful — raising an error and cleaning up otherwise.
+Splits the Constellation run identifier (e.g. `run_71`) on the **last** underscore to get an integer run number for the binary's `-r` argument, creates the run's output directory if needed, launches `MaltaMultiDAQ` with `cwd` set to `work_dir` (so its own relative config paths resolve correctly), and waits up to 60 seconds for a `"Start"` line on its stdout/stderr before considering the launch successful — raising an error and cleaning up otherwise.
 
 **`RUN` → `do_run`**
 On the first call for a run, launches the online monitor (`run_onlinemonitor.sh <run_number>`) as a non-blocking background process; subsequent calls do nothing further.
 
 **`stopping` → `do_stopping`**
-Sends `SIGTERM` (never `SIGKILL` first) to the DAQ binary so its signal handler can close the ROOT output files properly, waiting up to 20 seconds before falling back to a kill. The monitor process is stopped the same way with a shorter timeout.
+Sends `SIGTERM` to the DAQ binary so its signal handler can close the ROOT output files properly, waiting up to 3 minutes before falling back to a kill. The monitor process is stopped the same way with a shorter timeout.
 
 **`landing`**
 Clears the process handles.
@@ -92,21 +88,17 @@ Clears the process handles.
 
 `MaltaMultiDAQ` and `corry` (Corryvreckan) depend on different, incompatible ROOT installations, and `corry`'s ROOT path is hard-coded in its RPATH (not overridable via `LD_LIBRARY_PATH`, unlike a RUNPATH). `run_onlinemonitor.sh` must therefore start from a clean environment (`unset LD_LIBRARY_PATH`/`ROOTSYS`/`PYTHONPATH`) before calling `corry` — injecting the LCG_104d ROOT/gcc paths causes `undefined symbol` errors from ABI incompatibility (ROOT 6.28.12 vs 6.32.02).
 
-### Known limitations
-
-- Assumes `run_id` always has the form `prefix_number`; an id without an underscore raises an error.
-- The startup detection depends on the exact `"Start"` wording in `MaltaMultiDAQ`'s stdout — update if that logging changes.
-- The online monitor is not restarted automatically if it crashes mid-run.
-
 ### Configuration example
 
 ```toml
 binary_path = "/home/MaltaSW/build/MaltaDAQ/MaltaMultiDAQ"
-daq_config = "/home/MaltaSW/MaltaDAQ/configs/Malta2_W4R1_Initial.txt"
+daq_config =  "/home/MaltaSW/MaltaDAQ/configs/2DUT_Const_Test.txt"
 work_dir = "/home/MaltaSW/MaltaDAQ"
 monitor_dir = "/home/MaltaSW/ReadyJuneBeamtest/config/2malta_dut"
+monitor_script = "run_onlinemonitor.sh"
+_conditions.require_stopping_after = ["MaltaTLU.TLU"] 
 ```
-
+The last configuration element is here to wait for the TLU to stop its run before stopping the DAQ
 ---
 ---
 
@@ -161,7 +153,7 @@ Trigger planes 1/2/3 each have a corresponding busy-line input, wired to planes 
 
 ### ⚠️ Known issue: `reconfigure` is not currently usable from MissionControl
 
-The satellite implements `do_reconfigure` to allow changing part of the configuration without a full `initialize`/`launch` cycle. MissionControl's basic command field only accepts a bare command name, with no way to attach the required dictionary payload — sending `reconfigure` alone fails. A workaround via the Controller's scriptable interface (passing an explicit Python dictionary) has not yet been confirmed working end-to-end. Treat `reconfigure` as unsupported for now; use a full `initialize`/`launch` cycle to change the configuration.
+The satellite implements `do_reconfigure` to allow changing part of the configuration without a full `initialize`/`launch` cycle. This method cannot be called using the GUI controller, it can ONLY be done YET via the Controller's scriptable interface (passing an explicit Python dictionary) .
 
 ### Configuration keys
 
@@ -177,7 +169,7 @@ The satellite implements `do_reconfigure` to allow changing part of the configur
 | `max_rate_hz` / `max_rate_enabled` | L1A max-rate limiting |
 | `monitor_counter` | Optional override of the auto-selected main counter |
 | `poll_interval_s` / `telemetry_interval_s` / `status_every_s` | Polling, telemetry, and log cadence |
-
+| `_conditions.require_starting_after = ["MaltaDAQ.W4R1_W2R6"]` | requires the DAQ to be running before starting the run
 ---
 ---
 ---
