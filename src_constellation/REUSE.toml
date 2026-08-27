@@ -1,9 +1,0 @@
-# SPDX-FileCopyrightText: 2026 DESY and the Constellation authors
-# SPDX-License-Identifier: CC0-1.0
-
-version = 1
-
-[[annotations]]
-path = ".proselint.json"
-SPDX-FileCopyrightText = "DESY and the Constellation authors"
-SPDX-License-Identifier = "CC0-1.0"
