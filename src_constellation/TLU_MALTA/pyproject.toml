@@ -1,0 +1,63 @@
+# SPDX-FileCopyrightText: 2025 DESY and the Constellation authors
+# SPDX-License-Identifier: CC0-1.0
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "TLU_MALTASatellite"
+version = "0.0.1"
+authors = [{name = "Constellation Authors"}]
+description = "TLU_MALTA Satellite for Constellation"
+readme = "README.md"
+license = {text = "EUPL-1.2"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: Unix",
+    "License :: OSI Approved",
+    "License :: OSI Approved :: European Union Public Licence 1.2 (EUPL 1.2)",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+]
+requires-python = ">=3.11"
+dependencies = [
+    "ConstellationDAQ",
+]
+
+[project.scripts]
+SatelliteTLU_MALTA = "TLU_MALTA.__main__:main"
+
+[project.entry-points."constellation.satellites"]
+TLU_MALTA = "TLU_MALTA"
+
+[project.urls]
+Homepage = "TODO"
+Repository = "TODO"
+
+[project.optional-dependencies]
+dev = [
+    "basedpyright",
+    "ruff",
+]
+
+[tool.pyright]
+typeCheckingMode = "standard"
+
+[tool.ruff]
+line-length = 125
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle
+    "F",   # pyflakes
+    "B",   # flake8-bugbear
+    "A",   # flake8-builtins
+    "I",   # isort
+    "UP",  # pyupgrade
+]
